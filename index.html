@@ -14,6 +14,11 @@
   #sidebar p{font-size:12px;color:#666;margin:0}
   #search{padding:10px 12px;border-bottom:1px solid #eee}
   #search input{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #d0d4da;border-radius:6px;font-size:13px}
+  #filters{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;font-size:11px;color:#444}
+  #filters label{display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none}
+  #filters input{margin:0;cursor:pointer}
+  #filters .chip-dot{display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+  #filters .chip-sq{display:inline-block;width:9px;height:9px;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
   #count{padding:6px 14px;font-size:12px;color:#666;border-bottom:1px solid #f0f0f0}
   #list{overflow:auto;flex:1}
   .item{padding:8px 14px;border-bottom:1px solid #f3f3f3;cursor:pointer;font-size:13px}
@@ -60,7 +65,14 @@
       <h1>日本の港湾ライブカメラ</h1>
       <p>海上保安庁 MICS / 東京都離島港湾 / 各局</p>
     </header>
-    <div id="search"><input id="q" placeholder="名前・出典・管区で検索…" autocomplete="off"></div>
+    <div id="search">
+      <input id="q" placeholder="名前・出典・管区で検索…" autocomplete="off">
+      <div id="filters">
+        <label><input type="checkbox" autocomplete="off" data-kind="mics" checked><span class="chip-dot" style="background:#e0432f"></span>MICS</label>
+        <label><input type="checkbox" autocomplete="off" data-kind="yt" checked><span class="chip-dot" style="background:#1ea44c"></span>YouTube</label>
+        <label><input type="checkbox" autocomplete="off" data-kind="port" checked><span class="chip-sq" style="background:#888"></span>港湾</label>
+      </div>
+    </div>
     <div id="count"></div>
     <div id="list"></div>
     <div id="legend">
@@ -180,6 +192,8 @@
   const countEl = document.getElementById('count');
   const qEl     = document.getElementById('q');
 
+  const kindEnabled = {mics:true, yt:true, port:true};
+
   function render(filter){
     const f = (filter||'').trim().toLowerCase();
     listEl.innerHTML = '';
@@ -189,10 +203,12 @@
       const hay = (c.jp_name + ' ' +
         (c._type === 'mics' ? c.kanku + ' ' + c.hoanbu : c.source)
       ).toLowerCase();
-      const match = !f || hay.includes(f);
+      const kindOn = kindEnabled[c._type];
+      const match = kindOn && (!f || hay.includes(f));
       const mk = markers.get(c.id);
       const el = mk && mk.getElement();
       const dot = el && el.querySelector('.cam-marker');
+      if (el) el.style.display = kindOn ? '' : 'none';
       if (dot) dot.classList.toggle('dim', !match);
       if (!match) return;
       n++;
@@ -217,10 +233,12 @@
 
     allPorts.forEach(p => {
       const hay = (p.name + ' ' + p.rate + ' ' + p.berths.map(b=>b.cargo).join(' ')).toLowerCase();
-      const match = !f || hay.includes(f);
+      const kindOn = kindEnabled.port;
+      const match = kindOn && (!f || hay.includes(f));
       const mk = portMarkers.get(p.id);
       const el = mk && mk.getElement();
       const sq = el && el.querySelector('.port-marker');
+      if (el) el.style.display = kindOn ? '' : 'none';
       if (sq) sq.classList.toggle('dim', !match);
       if (!match) return;
       n++;
@@ -253,6 +271,12 @@
   }
 
   qEl.addEventListener('input', e => render(e.target.value));
+  document.querySelectorAll('#filters input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      kindEnabled[cb.dataset.kind] = cb.checked;
+      render(qEl.value);
+    });
+  });
   render('');
 })();
 </script>
