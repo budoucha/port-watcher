@@ -2,6 +2,10 @@
 
 日本の港湾・沿岸ライブカメラを白地図上にプロットするダッシュボード。海上保安庁「[海の安全情報](https://www6.kaiho.mlit.go.jp/livecamera.html)」の MICS ライブカメラ網（全国 79 点）を地図から横断的に閲覧できます。
 
+**GitHub Pages で公開中 → https://budoucha.github.io/port-watcher/**
+
+![スクリーンショット](docs/screenshot.png)
+
 静的サイトなので GitHub Pages でそのまま動きます。
 
 ## 使い方
