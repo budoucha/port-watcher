@@ -27,7 +27,7 @@
   #map{flex:1;background:#eaf1f8}
   .leaflet-container{background:#eaf1f8}
   .leaflet-popup-content{margin:10px 12px;font-size:13px;min-width:260px}
-  .leaflet-popup-content-wrapper{max-width:340px}
+  .leaflet-popup-content-wrapper{max-width:520px}
   .popup-title{font-weight:600;margin-bottom:3px;font-size:14px}
   .popup-meta{color:#666;font-size:11px;margin-bottom:8px}
   .popup-thumb{display:block;width:100%;height:auto;border-radius:4px;background:#000;margin-bottom:8px}
@@ -38,9 +38,19 @@
   .cam-marker.mics{background:#e0432f}
   .cam-marker.yt{background:#1ea44c}
   .cam-marker.dim{background:#bbb !important}
-  #legend{padding:8px 14px;border-top:1px solid #eee;font-size:11px;color:#666;display:flex;gap:12px}
+  .port-marker{width:12px;height:12px;background:#888;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3);cursor:pointer}
+  .port-marker.dim{background:#ccc !important}
+  #legend{padding:8px 14px;border-top:1px solid #eee;font-size:11px;color:#666;display:flex;gap:12px;flex-wrap:wrap}
   .leg{display:flex;align-items:center;gap:4px}
   .leg-dot{width:10px;height:10px;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+  .leg-sq{width:10px;height:10px;background:#888;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+  .badge-port{background:#666;color:#fff}
+  .popup-berth-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}
+  .popup-berth-table th{background:#f0f0f0;padding:3px 5px;text-align:left;font-weight:600;white-space:nowrap}
+  .popup-berth-table td{padding:3px 5px;border-bottom:1px solid #f0f0f0;white-space:nowrap}
+  .popup-berth-table tr:last-child td{border-bottom:none}
+  .popup-port-wrap{max-height:280px;overflow-y:auto}
+  .popup-port-rate{display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:#555;color:#fff;margin-left:5px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -56,6 +66,7 @@
     <div id="legend">
       <div class="leg"><div class="leg-dot" style="background:#e0432f"></div>海保 MICS</div>
       <div class="leg"><div class="leg-dot" style="background:#1ea44c"></div>YouTube ライブ</div>
+      <div class="leg"><div class="leg-sq"></div>港湾インフラ (MLIT)</div>
     </div>
   </aside>
   <div id="map"></div>
@@ -65,11 +76,13 @@
 <script src="https://unpkg.com/topojson-client@3"></script>
 <script src="data.js"></script>
 <script src="extra-cameras.js"></script>
+<script src="berths.js"></script>
 <script>
 (function(){
   const micsCams = window.CAMERAS.map(c => ({...c, _type:'mics'}));
   const ytCams   = (window.EXTRA_CAMERAS||[]).map(c => ({...c, _type:'yt'}));
   const allCams  = [...micsCams, ...ytCams];
+  const allPorts = (window.PORT_BERTHS||[]);
 
   const topo = window.JAPAN_TOPO;
 
@@ -114,7 +127,28 @@
       </div>`;
   }
 
+  // 港湾インフラ ポップアップ
+  function portPopup(p){
+    const rateHtml = p.rate ? `<span class="popup-port-rate">${p.rate}</span>` : '';
+    const rows = p.berths.map(b => {
+      const depth = b.depth != null ? b.depth + 'm' : '-';
+      const dwt   = b.dwt  != null ? b.dwt.toLocaleString() + 't' : '-';
+      const grade = b.grade || '-';
+      const cargo = b.cargo || '-';
+      return `<tr><td>${b.name||'-'}</td><td>${b.type||'-'}</td><td>${depth}</td><td>${cargo}</td><td>${dwt}</td><td>${grade}</td></tr>`;
+    }).join('');
+    return `<div class="popup-title">${p.name}${rateHtml}</div>
+      <div class="popup-meta">岸壁数 ${p.berths.length} — MLIT 港湾カルテ</div>
+      <div class="popup-port-wrap">
+        <table class="popup-berth-table">
+          <thead><tr><th>岸壁名</th><th>種別</th><th>水深</th><th>主要貨物</th><th>DWT</th><th>評価</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
   const markers = new Map();
+  const portMarkers = new Map();
 
   allCams.forEach(c => {
     const isYt = c._type === 'yt';
@@ -129,6 +163,18 @@
     markers.set(c.id, m);
   });
 
+  allPorts.forEach(p => {
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="port-marker" title="${p.name}"></div>`,
+      iconSize: [12,12], iconAnchor: [6,6]
+    });
+    const m = L.marker([p.lat, p.lon], {icon}).addTo(map);
+    m.bindPopup(() => portPopup(p), {maxWidth:500});
+    m.on('click', () => highlightPort(p.id));
+    portMarkers.set(p.id, m);
+  });
+
   // サイドバー
   const listEl  = document.getElementById('list');
   const countEl = document.getElementById('count');
@@ -138,6 +184,7 @@
     const f = (filter||'').trim().toLowerCase();
     listEl.innerHTML = '';
     let n = 0;
+
     allCams.forEach(c => {
       const hay = (c.jp_name + ' ' +
         (c._type === 'mics' ? c.kanku + ' ' + c.hoanbu : c.source)
@@ -152,6 +199,7 @@
       const div = document.createElement('div');
       div.className = 'item';
       div.dataset.id = String(c.id);
+      div.dataset.kind = 'cam';
       const badge = c._type === 'yt'
         ? '<span class="badge badge-yt">YT</span>'
         : '<span class="badge badge-mics">MICS</span>';
@@ -166,13 +214,42 @@
       });
       listEl.appendChild(div);
     });
-    countEl.textContent = `${n} / ${allCams.length} 件`;
+
+    allPorts.forEach(p => {
+      const hay = (p.name + ' ' + p.rate + ' ' + p.berths.map(b=>b.cargo).join(' ')).toLowerCase();
+      const match = !f || hay.includes(f);
+      const mk = portMarkers.get(p.id);
+      const el = mk && mk.getElement();
+      const sq = el && el.querySelector('.port-marker');
+      if (sq) sq.classList.toggle('dim', !match);
+      if (!match) return;
+      n++;
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.dataset.id = p.id;
+      div.dataset.kind = 'port';
+      div.innerHTML = `<div class="name">${p.name}<span class="badge badge-port">港湾</span></div><div class="meta">${p.rate} · 岸壁 ${p.berths.length}基</div>`;
+      div.addEventListener('click', () => {
+        map.setView([p.lat, p.lon], Math.max(map.getZoom(), 9), {animate:true});
+        mk.openPopup();
+        highlightPort(p.id);
+      });
+      listEl.appendChild(div);
+    });
+
+    const total = allCams.length + allPorts.length;
+    countEl.textContent = `${n} / ${total} 件`;
   }
 
   function highlight(id){
     const sid = String(id);
     document.querySelectorAll('.item').forEach(el =>
-      el.classList.toggle('active', el.dataset.id === sid));
+      el.classList.toggle('active', el.dataset.id === sid && el.dataset.kind === 'cam'));
+  }
+
+  function highlightPort(id){
+    document.querySelectorAll('.item').forEach(el =>
+      el.classList.toggle('active', el.dataset.id === id && el.dataset.kind === 'port'));
   }
 
   qEl.addEventListener('input', e => render(e.target.value));
