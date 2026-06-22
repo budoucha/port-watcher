@@ -21,17 +21,26 @@
   .item.active{background:#e8f0fb}
   .item .name{font-weight:600}
   .item .meta{font-size:11px;color:#888;margin-top:2px}
+  .item .badge{display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;font-weight:normal}
+  .badge-yt{background:#ff0000;color:#fff}
+  .badge-mics{background:#1f6feb;color:#fff}
   #map{flex:1;background:#eaf1f8}
   .leaflet-container{background:#eaf1f8}
-  .japan{fill:#fbfbf7;stroke:#7d8590;stroke-width:0.6}
-  .leaflet-popup-content{margin:10px 12px;font-size:13px;min-width:240px}
-  .popup-title{font-weight:600;margin-bottom:4px;font-size:14px}
+  .leaflet-popup-content{margin:10px 12px;font-size:13px;min-width:260px}
+  .leaflet-popup-content-wrapper{max-width:340px}
+  .popup-title{font-weight:600;margin-bottom:3px;font-size:14px}
   .popup-meta{color:#666;font-size:11px;margin-bottom:8px}
   .popup-thumb{display:block;width:100%;height:auto;border-radius:4px;background:#000;margin-bottom:8px}
+  .popup-yt{display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:4px;margin-bottom:8px;background:#000}
   .popup-actions a{display:inline-block;padding:5px 10px;background:#1f6feb;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;margin-right:6px}
-  .popup-actions a.alt{background:#e8eaed;color:#222}
-  .cam-marker{width:14px;height:14px;border-radius:50%;background:#e0432f;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3);cursor:pointer}
-  .cam-marker.dim{background:#bbb}
+  .popup-actions a.yt-link{background:#ff0000}
+  .cam-marker{width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3);cursor:pointer}
+  .cam-marker.mics{background:#e0432f}
+  .cam-marker.yt{background:#1ea44c}
+  .cam-marker.dim{background:#bbb !important}
+  #legend{padding:8px 14px;border-top:1px solid #eee;font-size:11px;color:#666;display:flex;gap:12px}
+  .leg{display:flex;align-items:center;gap:4px}
+  .leg-dot{width:10px;height:10px;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
 </style>
 </head>
 <body>
@@ -39,11 +48,15 @@
   <aside id="sidebar">
     <header>
       <h1>日本の港湾ライブカメラ</h1>
-      <p>海上保安庁 海の安全情報より</p>
+      <p>海上保安庁 MICS / 東京都離島港湾 / 各局</p>
     </header>
-    <div id="search"><input id="q" placeholder="名前・管区・保安部で検索…" autocomplete="off"></div>
+    <div id="search"><input id="q" placeholder="名前・出典・管区で検索…" autocomplete="off"></div>
     <div id="count"></div>
     <div id="list"></div>
+    <div id="legend">
+      <div class="leg"><div class="leg-dot" style="background:#e0432f"></div>海保 MICS</div>
+      <div class="leg"><div class="leg-dot" style="background:#1ea44c"></div>YouTube ライブ</div>
+    </div>
   </aside>
   <div id="map"></div>
 </div>
@@ -51,77 +64,101 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/topojson-client@3"></script>
 <script src="data.js"></script>
+<script src="extra-cameras.js"></script>
 <script>
 (function(){
-  const cams = window.CAMERAS;
+  const micsCams = window.CAMERAS.map(c => ({...c, _type:'mics'}));
+  const ytCams   = (window.EXTRA_CAMERAS||[]).map(c => ({...c, _type:'yt'}));
+  const allCams  = [...micsCams, ...ytCams];
+
   const topo = window.JAPAN_TOPO;
 
   const map = L.map('map', {
     center: [36.5, 137.5],
-    zoom: 5,
+    zoom: 6,
     minZoom: 4,
     maxZoom: 12,
     zoomControl: true,
     attributionControl: false
   });
 
-  // 白地図: TopoJSON → GeoJSON
+  // 白地図
   const objKey = Object.keys(topo.objects)[0];
   const gj = topojson.feature(topo, topo.objects[objKey]);
   L.geoJSON(gj, {
-    style: () => ({
-      color: '#7d8590', weight: 0.6, fillColor: '#fbfbf7', fillOpacity: 1
-    })
+    style: () => ({color:'#7d8590', weight:0.6, fillColor:'#fbfbf7', fillOpacity:1})
   }).addTo(map);
 
-  // カメラURL組み立て
-  const camPageURL = c => `https://camera.mics.kaiho.mlit.go.jp/camstream/${c.base_name}/`;
-  const thumbURL = c => `https://camera.mics.kaiho.mlit.go.jp/camportalAPI/camera/getthumbnail?id=${c.id}&timestamp=${Date.now()}`;
+  // MICS ポップアップ
+  const micsThumbURL = c => `https://camera.mics.kaiho.mlit.go.jp/camportalAPI/camera/getthumbnail?id=${c.id}&timestamp=${Date.now()}`;
+  const micsPageURL  = c => `https://camera.mics.kaiho.mlit.go.jp/camstream/${c.base_name}/`;
 
-  const markers = new Map(); // id -> marker
-
-  function popupHTML(c){
-    return `
-      <div class="popup-title">${c.jp_name}</div>
+  function micsPopup(c){
+    return `<div class="popup-title">${c.jp_name}</div>
       <div class="popup-meta">${c.kanku} / ${c.hoanbu}</div>
-      <img class="popup-thumb" src="${thumbURL(c)}" alt="thumbnail" onerror="this.style.display='none'">
+      <img class="popup-thumb" src="${micsThumbURL(c)}" alt="" onerror="this.style.display='none'">
       <div class="popup-actions">
-        <a href="${camPageURL(c)}" target="_blank" rel="noopener">ライブカメラを開く</a>
+        <a href="${micsPageURL(c)}" target="_blank" rel="noopener">ライブカメラを開く</a>
       </div>`;
   }
 
-  cams.forEach(c => {
+  // YouTube ポップアップ（クリック時にのみ iframe を挿入）
+  function ytPopup(c){
+    const embedSrc = `https://www.youtube.com/embed/${c.videoId}?autoplay=1&mute=1`;
+    const watchURL = `https://www.youtube.com/watch?v=${c.videoId}`;
+    return `<div class="popup-title">${c.jp_name}</div>
+      <div class="popup-meta">${c.source}</div>
+      <iframe class="popup-yt" src="${embedSrc}" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+      <div class="popup-actions">
+        <a class="yt-link" href="${watchURL}" target="_blank" rel="noopener">YouTube で開く</a>
+      </div>`;
+  }
+
+  const markers = new Map();
+
+  allCams.forEach(c => {
+    const isYt = c._type === 'yt';
     const icon = L.divIcon({
-      className: '', html: '<div class="cam-marker" title="'+c.jp_name+'"></div>',
+      className: '',
+      html: `<div class="cam-marker ${c._type}" title="${c.jp_name}"></div>`,
       iconSize: [14,14], iconAnchor: [7,7]
     });
     const m = L.marker([c.latitude, c.longitude], {icon}).addTo(map);
-    m.bindPopup(() => popupHTML(c), {maxWidth: 320});
+    m.bindPopup(() => isYt ? ytPopup(c) : micsPopup(c), {maxWidth:320});
     m.on('click', () => highlight(c.id));
     markers.set(c.id, m);
   });
 
   // サイドバー
-  const listEl = document.getElementById('list');
+  const listEl  = document.getElementById('list');
   const countEl = document.getElementById('count');
-  const qEl = document.getElementById('q');
+  const qEl     = document.getElementById('q');
 
   function render(filter){
     const f = (filter||'').trim().toLowerCase();
     listEl.innerHTML = '';
     let n = 0;
-    cams.forEach(c => {
-      const hay = (c.jp_name+' '+c.kanku+' '+c.hoanbu+' '+c.base_name).toLowerCase();
+    allCams.forEach(c => {
+      const hay = (c.jp_name + ' ' +
+        (c._type === 'mics' ? c.kanku + ' ' + c.hoanbu : c.source)
+      ).toLowerCase();
       const match = !f || hay.includes(f);
       const mk = markers.get(c.id);
-      const el = mk.getElement();
+      const el = mk && mk.getElement();
       const dot = el && el.querySelector('.cam-marker');
       if (dot) dot.classList.toggle('dim', !match);
       if (!match) return;
       n++;
       const div = document.createElement('div');
-      div.className = 'item'; div.dataset.id = c.id;
-      div.innerHTML = `<div class="name">${c.jp_name}</div><div class="meta">${c.kanku} · ${c.hoanbu}</div>`;
+      div.className = 'item';
+      div.dataset.id = String(c.id);
+      const badge = c._type === 'yt'
+        ? '<span class="badge badge-yt">YT</span>'
+        : '<span class="badge badge-mics">MICS</span>';
+      const meta = c._type === 'mics'
+        ? `${c.kanku} · ${c.hoanbu}`
+        : c.source;
+      div.innerHTML = `<div class="name">${c.jp_name}${badge}</div><div class="meta">${meta}</div>`;
       div.addEventListener('click', () => {
         map.setView([c.latitude, c.longitude], Math.max(map.getZoom(), 8), {animate:true});
         mk.openPopup();
@@ -129,11 +166,13 @@
       });
       listEl.appendChild(div);
     });
-    countEl.textContent = `${n} / ${cams.length} 件`;
+    countEl.textContent = `${n} / ${allCams.length} 件`;
   }
 
   function highlight(id){
-    document.querySelectorAll('.item').forEach(el => el.classList.toggle('active', +el.dataset.id === id));
+    const sid = String(id);
+    document.querySelectorAll('.item').forEach(el =>
+      el.classList.toggle('active', el.dataset.id === sid));
   }
 
   qEl.addEventListener('input', e => render(e.target.value));
